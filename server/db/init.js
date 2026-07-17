@@ -332,6 +332,39 @@ function buildTours() {
   }))
 }
 
+// Older deployments keyed flights on (flight_number, departure_date). Since departure_date is
+// recomputed as "N days from now" at every boot, that key let a server restart on a new calendar
+// day insert a fresh duplicate row instead of updating the existing one. This migrates any
+// pre-existing database to a (flight_number) key, preserving whichever duplicate row (if any)
+// already has real bookings attached, and is a no-op once the new constraint is in place.
+async function migrateFlightsUniqueConstraint(client) {
+  const { rows: constraints } = await client.query(
+    `SELECT conname FROM pg_constraint WHERE conrelid = 'flights'::regclass AND contype = 'u'`
+  )
+  if (constraints.some((c) => c.conname === 'flights_flight_number_key')) return
+
+  const { rows: dupes } = await client.query(`
+    SELECT flight_number, array_agg(id ORDER BY departure_date) AS ids
+    FROM flights GROUP BY flight_number HAVING count(*) > 1
+  `)
+  for (const { ids } of dupes) {
+    const { rows: booked } = await client.query(
+      'SELECT DISTINCT flight_id FROM flight_bookings WHERE flight_id = ANY($1::uuid[])',
+      [ids]
+    )
+    const keepId = booked[0]?.flight_id || ids[0]
+    const deleteIds = ids.filter((id) => id !== keepId)
+    if (deleteIds.length) {
+      await client.query('DELETE FROM flights WHERE id = ANY($1::uuid[])', [deleteIds])
+    }
+  }
+
+  if (constraints.some((c) => c.conname === 'flights_flight_number_departure_date_key')) {
+    await client.query('ALTER TABLE flights DROP CONSTRAINT flights_flight_number_departure_date_key')
+  }
+  await client.query('ALTER TABLE flights ADD CONSTRAINT flights_flight_number_key UNIQUE (flight_number)')
+}
+
 async function createSchema(client) {
   await client.query('CREATE EXTENSION IF NOT EXISTS pgcrypto')
 
@@ -355,9 +388,11 @@ async function createSchema(client) {
       international BOOLEAN NOT NULL DEFAULT false,
       seats_available INTEGER NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      UNIQUE (flight_number, departure_date)
+      UNIQUE (flight_number)
     )
   `)
+
+  await migrateFlightsUniqueConstraint(client)
 
   await client.query(`
     CREATE TABLE IF NOT EXISTS hotels (
@@ -479,7 +514,7 @@ async function seedFlights(client) {
          departure_date, departure_time, arrival_time, duration,
          cabin_class, price, international, seats_available
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-       ON CONFLICT (flight_number, departure_date) DO UPDATE SET
+       ON CONFLICT (flight_number) DO UPDATE SET
          airline = EXCLUDED.airline,
          origin_city = EXCLUDED.origin_city,
          origin_code = EXCLUDED.origin_code,
