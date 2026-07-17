@@ -2,15 +2,13 @@ import express from 'express'
 import { pool } from '../db.js'
 import { requireAuth } from '../middleware/require-auth.js'
 import { optionalAuth } from '../middleware/optional-auth.js'
+import { bookTour } from '../services/bookings.js'
 
 const router = express.Router()
 
 router.post('/', optionalAuth, async (req, res, next) => {
   const { tourId, tourDate, participants, guestName, guestEmail, guestPhone } = req.body
 
-  if (!tourId || !tourDate || !participants || participants < 1) {
-    return res.status(400).json({ error: 'tourId, tourDate and participants are required' })
-  }
   if (!guestName || !guestEmail) {
     return res.status(400).json({ error: 'Name and email are required' })
   }
@@ -18,31 +16,14 @@ router.post('/', optionalAuth, async (req, res, next) => {
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
-
-    const { rows } = await client.query('SELECT * FROM tours WHERE id = $1 FOR UPDATE', [tourId])
-    const tour = rows[0]
-    if (!tour) {
-      await client.query('ROLLBACK')
-      return res.status(404).json({ error: 'Tour not found' })
-    }
-    if (tour.spots_available < participants) {
-      await client.query('ROLLBACK')
-      return res.status(409).json({ error: `Only ${tour.spots_available} spots left on this tour` })
-    }
-
-    const totalPrice = Number(tour.price_per_person) * participants
-
-    await client.query('UPDATE tours SET spots_available = spots_available - $1 WHERE id = $2', [participants, tourId])
-    const { rows: bookingRows } = await client.query(
-      `INSERT INTO tour_bookings (tour_id, user_id, guest_name, guest_email, guest_phone, tour_date, participants, total_price)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [tourId, req.user?.id ?? null, guestName, guestEmail, guestPhone ?? null, tourDate, participants, totalPrice]
-    )
-
+    const { booking } = await bookTour(client, {
+      tourId, tourDate, participants, userId: req.user?.id ?? null, guestName, guestEmail, guestPhone,
+    })
     await client.query('COMMIT')
-    res.status(201).json(bookingRows[0])
+    res.status(201).json(booking)
   } catch (err) {
     await client.query('ROLLBACK')
+    if (err.status) return res.status(err.status).json({ error: err.message })
     next(err)
   } finally {
     client.release()

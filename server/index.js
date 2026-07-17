@@ -11,6 +11,7 @@ import hotelsRouter from './routes/hotels.js'
 import hotelBookingsRouter from './routes/hotel-bookings.js'
 import toursRouter from './routes/tours.js'
 import tourBookingsRouter from './routes/tour-bookings.js'
+import ordersRouter from './routes/orders.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const distPath = path.join(__dirname, '..', 'dist')
@@ -28,6 +29,7 @@ app.use('/api/hotels', hotelsRouter)
 app.use('/api/hotel-bookings', hotelBookingsRouter)
 app.use('/api/tours', toursRouter)
 app.use('/api/tour-bookings', tourBookingsRouter)
+app.use('/api/orders', ordersRouter)
 
 app.use((err, req, res, _next) => {
   console.error(err)

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { fetchHotel, createHotelBooking } from '../api/client'
+import { fetchHotel, createHotelBooking, createOrder } from '../api/client'
 import { useSession } from '../lib/auth-client'
+import PaymentForm from '../components/PaymentForm'
+import Receipt from '../components/Receipt'
 
 function nightsBetween(checkIn, checkOut) {
   if (!checkIn || !checkOut) return 0
@@ -26,6 +28,10 @@ export default function HotelBooking() {
   const [guestEmail, setGuestEmail] = useState('')
   const [guestPhone, setGuestPhone] = useState('')
 
+  const [step, setStep] = useState('select') // select -> review -> payment -> receipt
+  const [paymentError, setPaymentError] = useState('')
+  const [order, setOrder] = useState(null)
+
   useEffect(() => {
     fetchHotel(id)
       .then(setHotel)
@@ -43,13 +49,19 @@ export default function HotelBooking() {
   const nights = useMemo(() => nightsBetween(checkIn, checkOut), [checkIn, checkOut])
   const total = hotel ? hotel.price_per_night * rooms * nights : 0
 
-  async function handleSubmit(e) {
+  async function handleSelectSubmit(e) {
     e.preventDefault()
     setError('')
     if (nights <= 0) {
       setError('Check-out date must be after check-in date')
       return
     }
+
+    if (session) {
+      setStep('review')
+      return
+    }
+
     setSubmitting(true)
     try {
       const booking = await createHotelBooking({
@@ -69,8 +81,48 @@ export default function HotelBooking() {
     }
   }
 
+  async function handlePayment(paymentDetails) {
+    setPaymentError('')
+    setSubmitting(true)
+    try {
+      const newOrder = await createOrder({
+        category: 'hotel',
+        hotelId: id,
+        checkIn,
+        checkOut,
+        rooms: Number(rooms),
+        customerName: guestName,
+        customerEmail: guestEmail,
+        customerPhone: guestPhone,
+        payment: paymentDetails,
+      })
+      setOrder(newOrder)
+      setStep('receipt')
+    } catch (err) {
+      setPaymentError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   if (loading) return <p className="py-20 text-center text-slate-500">Loading hotel...</p>
   if (!hotel) return <p className="py-20 text-center text-rose-400">{error || 'Hotel not found'}</p>
+
+  if (order) {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-12 sm:px-6">
+        <Receipt order={order} />
+        <div className="mt-6 flex justify-center gap-3">
+          <Link to="/hotels" className="rounded-full border border-white/15 px-5 py-2 text-sm font-medium text-slate-200 hover:bg-white/5">
+            Book another hotel
+          </Link>
+          <Link to="/my-orders" className="rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-5 py-2 text-sm font-semibold text-white">
+            View my orders
+          </Link>
+        </div>
+      </div>
+    )
+  }
 
   if (confirmation) {
     return (
@@ -87,11 +139,6 @@ export default function HotelBooking() {
             <Link to="/hotels" className="rounded-full border border-white/15 px-5 py-2 text-sm font-medium text-slate-200 hover:bg-white/5">
               Book another hotel
             </Link>
-            {session && (
-              <Link to="/my-bookings" className="rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-5 py-2 text-sm font-semibold text-white">
-                View my bookings
-              </Link>
-            )}
           </div>
         </div>
       </div>
@@ -100,23 +147,103 @@ export default function HotelBooking() {
 
   const soldOut = hotel.rooms_available <= 0
 
-  return (
-    <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
-      <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
-        <img src={hotel.image} alt={hotel.name} className="h-56 w-full object-cover" />
-        <div className="p-6">
-          <div className="flex items-start justify-between">
-            <h1 className="text-2xl font-bold text-white">{hotel.name}</h1>
-            <span className="text-amber-300">{'★'.repeat(hotel.star_rating)}</span>
+  const hotelSummary = (
+    <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
+      <img src={hotel.image} alt={hotel.name} className="h-56 w-full object-cover" />
+      <div className="p-6">
+        <div className="flex items-start justify-between">
+          <h1 className="text-2xl font-bold text-white">{hotel.name}</h1>
+          <span className="text-amber-300">{'★'.repeat(hotel.star_rating)}</span>
+        </div>
+        <p className="mt-1 text-slate-400">{hotel.city}, {hotel.country}</p>
+        <p className="mt-3 text-slate-300">{hotel.description}</p>
+        <p className="mt-3 text-2xl font-extrabold text-white">${Number(hotel.price_per_night).toLocaleString()} <span className="text-sm font-normal text-slate-400">per night</span></p>
+      </div>
+    </div>
+  )
+
+  if (step === 'review') {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
+        {hotelSummary}
+        <div className="mt-8 space-y-4 rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+          <h2 className="text-lg font-bold text-white">Review your order</h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-300">Full name</label>
+              <input
+                required
+                value={guestName}
+                onChange={(e) => setGuestName(e.target.value)}
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-white focus:border-cyan-400 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-300">Email</label>
+              <input
+                type="email"
+                required
+                value={guestEmail}
+                onChange={(e) => setGuestEmail(e.target.value)}
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-white focus:border-cyan-400 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-300">Phone (optional)</label>
+              <input
+                value={guestPhone}
+                onChange={(e) => setGuestPhone(e.target.value)}
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-white focus:border-cyan-400 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-300">Stay</label>
+              <p className="rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-white">
+                {checkIn} → {checkOut} · {rooms} room(s) · {nights} night(s)
+              </p>
+            </div>
           </div>
-          <p className="mt-1 text-slate-400">{hotel.city}, {hotel.country}</p>
-          <p className="mt-3 text-slate-300">{hotel.description}</p>
-          <p className="mt-3 text-2xl font-extrabold text-white">${Number(hotel.price_per_night).toLocaleString()} <span className="text-sm font-normal text-slate-400">per night</span></p>
+
+          <div className="flex items-center justify-between border-t border-white/10 pt-4">
+            <button onClick={() => setStep('select')} className="text-sm font-medium text-slate-400 hover:text-white">
+              ← Back
+            </button>
+            <div className="flex items-center gap-4">
+              <p className="text-lg font-bold text-white">Total: ${total.toLocaleString()}</p>
+              <button
+                onClick={() => setStep('payment')}
+                disabled={!guestName || !guestEmail}
+                className="rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-fuchsia-500/20 transition-transform hover:scale-105 disabled:opacity-50"
+              >
+                Proceed to Payment
+              </button>
+            </div>
+          </div>
         </div>
       </div>
+    )
+  }
 
-      <form onSubmit={handleSubmit} className="mt-8 space-y-4 rounded-2xl border border-white/10 bg-white/[0.03] p-6">
-        <h2 className="text-lg font-bold text-white">Reservation details</h2>
+  if (step === 'payment') {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
+        {hotelSummary}
+        <div className="mt-8">
+          <PaymentForm amount={total} onSubmit={handlePayment} submitting={submitting} error={paymentError} />
+          <button onClick={() => setStep('review')} className="mt-4 text-sm font-medium text-slate-400 hover:text-white">
+            ← Back to review
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
+      {hotelSummary}
+
+      <form onSubmit={handleSelectSubmit} className="mt-8 space-y-4 rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+        <h2 className="text-lg font-bold text-white">{session ? 'Stay details' : 'Reservation details'}</h2>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
@@ -151,33 +278,37 @@ export default function HotelBooking() {
               className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-white focus:border-cyan-400 focus:outline-none"
             />
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-300">Full name</label>
-            <input
-              required
-              value={guestName}
-              onChange={(e) => setGuestName(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-white focus:border-cyan-400 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-300">Email</label>
-            <input
-              type="email"
-              required
-              value={guestEmail}
-              onChange={(e) => setGuestEmail(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-white focus:border-cyan-400 focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-300">Phone (optional)</label>
-            <input
-              value={guestPhone}
-              onChange={(e) => setGuestPhone(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-white focus:border-cyan-400 focus:outline-none"
-            />
-          </div>
+          {!session && (
+            <>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-300">Full name</label>
+                <input
+                  required
+                  value={guestName}
+                  onChange={(e) => setGuestName(e.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-white focus:border-cyan-400 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-300">Email</label>
+                <input
+                  type="email"
+                  required
+                  value={guestEmail}
+                  onChange={(e) => setGuestEmail(e.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-white focus:border-cyan-400 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-300">Phone (optional)</label>
+                <input
+                  value={guestPhone}
+                  onChange={(e) => setGuestPhone(e.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 text-white focus:border-cyan-400 focus:outline-none"
+                />
+              </div>
+            </>
+          )}
         </div>
 
         {error && <p className="text-sm text-rose-400">{error}</p>}
@@ -191,7 +322,7 @@ export default function HotelBooking() {
             disabled={submitting || soldOut}
             className="rounded-full bg-gradient-to-r from-cyan-500 to-fuchsia-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-fuchsia-500/20 transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {soldOut ? 'Fully booked' : submitting ? 'Booking...' : 'Confirm Booking'}
+            {soldOut ? 'Fully booked' : submitting ? 'Booking...' : session ? 'Review Order' : 'Confirm Booking'}
           </button>
         </div>
       </form>

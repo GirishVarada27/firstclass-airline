@@ -46,3 +46,9 @@ export const createTourBooking = (payload) =>
   request('/tour-bookings', { method: 'POST', body: JSON.stringify(payload) })
 export const cancelTourBooking = (id) =>
   request(`/tour-bookings/${id}/cancel`, { method: 'POST' })
+
+// Orders (review -> payment -> receipt checkout, authenticated users only)
+export const createOrder = (payload) =>
+  request('/orders', { method: 'POST', body: JSON.stringify(payload) })
+export const fetchMyOrders = () => request('/orders/mine')
+export const fetchOrder = (id) => request(`/orders/${id}`)

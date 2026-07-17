@@ -13,6 +13,7 @@ import HotelBooking from './pages/HotelBooking'
 import ToursList from './pages/ToursList'
 import TourBooking from './pages/TourBooking'
 import MyBookings from './pages/MyBookings'
+import MyOrders from './pages/MyOrders'
 import VisaServices from './pages/VisaServices'
 import NotFound from './pages/NotFound'
 
@@ -39,6 +40,14 @@ function App() {
               element={
                 <RequireAuth>
                   <MyBookings />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/my-orders"
+              element={
+                <RequireAuth>
+                  <MyOrders />
                 </RequireAuth>
               }
             />

@@ -269,6 +269,36 @@ async function createSchema(client) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `)
+
+  await client.query(`CREATE SEQUENCE IF NOT EXISTS order_number_seq START 100000`)
+
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      order_number TEXT NOT NULL UNIQUE,
+      reference_number TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+      category TEXT NOT NULL CHECK (category IN ('flight', 'hotel', 'tour')),
+      flight_booking_id UUID REFERENCES flight_bookings(id),
+      hotel_booking_id UUID REFERENCES hotel_bookings(id),
+      tour_booking_id UUID REFERENCES tour_bookings(id),
+      customer_name TEXT NOT NULL,
+      customer_email TEXT NOT NULL,
+      customer_phone TEXT,
+      details JSONB NOT NULL,
+      total_amount NUMERIC NOT NULL,
+      payment_status TEXT NOT NULL DEFAULT 'paid',
+      payment_method TEXT NOT NULL DEFAULT 'card',
+      card_last4 TEXT NOT NULL,
+      card_holder TEXT NOT NULL,
+      order_date TIMESTAMPTZ NOT NULL DEFAULT now(),
+      CHECK (
+        (category = 'flight' AND flight_booking_id IS NOT NULL AND hotel_booking_id IS NULL AND tour_booking_id IS NULL) OR
+        (category = 'hotel' AND hotel_booking_id IS NOT NULL AND flight_booking_id IS NULL AND tour_booking_id IS NULL) OR
+        (category = 'tour' AND tour_booking_id IS NOT NULL AND flight_booking_id IS NULL AND hotel_booking_id IS NULL)
+      )
+    )
+  `)
 }
 
 async function seedFlights(client) {

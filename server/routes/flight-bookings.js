@@ -2,15 +2,13 @@ import express from 'express'
 import { pool } from '../db.js'
 import { requireAuth } from '../middleware/require-auth.js'
 import { optionalAuth } from '../middleware/optional-auth.js'
+import { bookFlight } from '../services/bookings.js'
 
 const router = express.Router()
 
 router.post('/', optionalAuth, async (req, res, next) => {
   const { flightId, passengers, guestName, guestEmail, guestPhone } = req.body
 
-  if (!flightId || !passengers || passengers < 1) {
-    return res.status(400).json({ error: 'flightId and passengers are required' })
-  }
   if (!guestName || !guestEmail) {
     return res.status(400).json({ error: 'Name and email are required' })
   }
@@ -18,31 +16,14 @@ router.post('/', optionalAuth, async (req, res, next) => {
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
-
-    const { rows } = await client.query('SELECT * FROM flights WHERE id = $1 FOR UPDATE', [flightId])
-    const flight = rows[0]
-    if (!flight) {
-      await client.query('ROLLBACK')
-      return res.status(404).json({ error: 'Flight not found' })
-    }
-    if (flight.seats_available < passengers) {
-      await client.query('ROLLBACK')
-      return res.status(409).json({ error: `Only ${flight.seats_available} seats left on this flight` })
-    }
-
-    const totalPrice = Number(flight.price) * passengers
-
-    await client.query('UPDATE flights SET seats_available = seats_available - $1 WHERE id = $2', [passengers, flightId])
-    const { rows: bookingRows } = await client.query(
-      `INSERT INTO flight_bookings (flight_id, user_id, guest_name, guest_email, guest_phone, passengers, total_price)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [flightId, req.user?.id ?? null, guestName, guestEmail, guestPhone ?? null, passengers, totalPrice]
-    )
-
+    const { booking } = await bookFlight(client, {
+      flightId, passengers, userId: req.user?.id ?? null, guestName, guestEmail, guestPhone,
+    })
     await client.query('COMMIT')
-    res.status(201).json(bookingRows[0])
+    res.status(201).json(booking)
   } catch (err) {
     await client.query('ROLLBACK')
+    if (err.status) return res.status(err.status).json({ error: err.message })
     next(err)
   } finally {
     client.release()

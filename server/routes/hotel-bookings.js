@@ -2,56 +2,28 @@ import express from 'express'
 import { pool } from '../db.js'
 import { requireAuth } from '../middleware/require-auth.js'
 import { optionalAuth } from '../middleware/optional-auth.js'
+import { bookHotel } from '../services/bookings.js'
 
 const router = express.Router()
-
-function nightsBetween(checkIn, checkOut) {
-  const ms = new Date(checkOut) - new Date(checkIn)
-  return Math.max(1, Math.round(ms / (1000 * 60 * 60 * 24)))
-}
 
 router.post('/', optionalAuth, async (req, res, next) => {
   const { hotelId, checkIn, checkOut, rooms, guestName, guestEmail, guestPhone } = req.body
 
-  if (!hotelId || !checkIn || !checkOut || !rooms || rooms < 1) {
-    return res.status(400).json({ error: 'hotelId, checkIn, checkOut and rooms are required' })
-  }
   if (!guestName || !guestEmail) {
     return res.status(400).json({ error: 'Name and email are required' })
-  }
-  if (new Date(checkOut) <= new Date(checkIn)) {
-    return res.status(400).json({ error: 'checkOut must be after checkIn' })
   }
 
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
-
-    const { rows } = await client.query('SELECT * FROM hotels WHERE id = $1 FOR UPDATE', [hotelId])
-    const hotel = rows[0]
-    if (!hotel) {
-      await client.query('ROLLBACK')
-      return res.status(404).json({ error: 'Hotel not found' })
-    }
-    if (hotel.rooms_available < rooms) {
-      await client.query('ROLLBACK')
-      return res.status(409).json({ error: `Only ${hotel.rooms_available} rooms left at this hotel` })
-    }
-
-    const nights = nightsBetween(checkIn, checkOut)
-    const totalPrice = Number(hotel.price_per_night) * rooms * nights
-
-    await client.query('UPDATE hotels SET rooms_available = rooms_available - $1 WHERE id = $2', [rooms, hotelId])
-    const { rows: bookingRows } = await client.query(
-      `INSERT INTO hotel_bookings (hotel_id, user_id, guest_name, guest_email, guest_phone, check_in, check_out, rooms, total_price)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [hotelId, req.user?.id ?? null, guestName, guestEmail, guestPhone ?? null, checkIn, checkOut, rooms, totalPrice]
-    )
-
+    const { booking } = await bookHotel(client, {
+      hotelId, checkIn, checkOut, rooms, userId: req.user?.id ?? null, guestName, guestEmail, guestPhone,
+    })
     await client.query('COMMIT')
-    res.status(201).json(bookingRows[0])
+    res.status(201).json(booking)
   } catch (err) {
     await client.query('ROLLBACK')
+    if (err.status) return res.status(err.status).json({ error: err.message })
     next(err)
   } finally {
     client.release()

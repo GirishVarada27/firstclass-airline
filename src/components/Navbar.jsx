@@ -39,6 +39,7 @@ export default function Navbar() {
           <NavLink to="/tours" className={navLinkClass}>City Tours</NavLink>
           <NavLink to="/visa-services" className={navLinkClass}>Visa Services</NavLink>
           {session && <NavLink to="/my-bookings" className={navLinkClass}>My Bookings</NavLink>}
+          {session && <NavLink to="/my-orders" className={navLinkClass}>My Orders</NavLink>}
         </nav>
 
         <div className="flex items-center gap-3">
@@ -76,6 +77,7 @@ export default function Navbar() {
         <NavLink to="/tours" className={navLinkClass}>Tours</NavLink>
         <NavLink to="/visa-services" className={navLinkClass}>Visa</NavLink>
         {session && <NavLink to="/my-bookings" className={navLinkClass}>Bookings</NavLink>}
+        {session && <NavLink to="/my-orders" className={navLinkClass}>Orders</NavLink>}
       </nav>
     </header>
   )
